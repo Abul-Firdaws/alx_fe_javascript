@@ -93,6 +93,74 @@
       display: none;
     }
     
+    .category-filter-section {
+      background-color: white;
+      padding: 25px;
+      border-radius: 10px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+      margin: 20px 0;
+      text-align: center;
+    }
+    
+    .category-filter-section h3 {
+      color: #333;
+      margin-bottom: 20px;
+      font-size: 1.4em;
+    }
+    
+    .filter-controls {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 15px;
+      flex-wrap: wrap;
+    }
+    
+    #categoryFilter {
+      padding: 12px 20px;
+      font-size: 16px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      background-color: white;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      min-width: 200px;
+    }
+    
+    #categoryFilter:hover {
+      border-color: #007bff;
+    }
+    
+    #categoryFilter:focus {
+      outline: none;
+      border-color: #007bff;
+      box-shadow: 0 0 10px rgba(0, 123, 255, 0.2);
+    }
+    
+    #resetFilter {
+      background-color: #6c757d;
+      padding: 12px 20px;
+    }
+    
+    #resetFilter:hover {
+      background-color: #5a6268;
+      box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
+    }
+    
+    .filter-status {
+      background-color: #e9f4ff;
+      color: #0056b3;
+      padding: 8px 15px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 500;
+      border: 2px solid #b3d9ff;
+    }
+    
+    .quote-display-filtered {
+      border-left: 4px solid #007bff;
+    }
+    
     .import-export-section {
       background-color: white;
       padding: 20px;
@@ -169,8 +237,21 @@
 </head>
 <body>
   <h1>Dynamic Quote Generator</h1>
+  
+  <div class="category-filter-section">
+    <h3>🔍 Filter by Category</h3>
+    <div class="filter-controls">
+      <select id="categoryFilter" onchange="filterQuotes()">
+        <option value="all">All Categories</option>
+        <!-- Dynamically populated categories -->
+      </select>
+      <button id="resetFilter">🔄 Reset Filter</button>
+      <span id="filterStatus" class="filter-status">Showing all quotes</span>
+    </div>
+  </div>
+  
   <div id="quoteDisplay">
-    <p>Click "Show New Quote" to display a random quote!</p>
+    <p>Select a category or click "Show New Quote" to display quotes!</p>
   </div>
   <div class="controls">
     <button id="newQuote">Show New Quote</button>
