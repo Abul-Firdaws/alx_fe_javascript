@@ -624,3 +624,81 @@ document.addEventListener('DOMContentLoaded', function() {
   console.log('Initial quotes count:', quotes.length);
   console.log('Filter system initialized');
 });
+
+// Mock API URL (JSONPlaceholder)
+const API_URL = "https://jsonplaceholder.typicode.com/posts";
+
+// Fetch quotes from the server
+async function fetchQuotesFromServer() {
+  try {
+    const response = await fetch(API_URL);
+    const data = await response.json();
+
+    // Map server data into { text, category }
+    return data.slice(0, 5).map(item => ({
+      text: item.title,
+      category: "Server"
+    }));
+  } catch (error) {
+    console.error("Error fetching from server:", error);
+    return [];
+  }
+}
+
+// Post a new quote to the server
+async function postQuoteToServer(quote) {
+  try {
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(quote)
+    });
+    const data = await response.json();
+    console.log("Posted to server:", data);
+  } catch (error) {
+    console.error("Error posting to server:", error);
+  }
+}
+
+// Sync local quotes with server
+async function syncQuotes() {
+  const serverQuotes = await fetchQuotesFromServer();
+  let localQuotes = JSON.parse(localStorage.getItem("quotes")) || [];
+
+  let conflicts = 0;
+
+  // Conflict resolution: server data takes precedence
+  serverQuotes.forEach(sq => {
+    const matchIndex = localQuotes.findIndex(lq => lq.text === sq.text);
+    if (matchIndex !== -1) {
+      localQuotes[matchIndex] = sq; // overwrite with server version
+      conflicts++;
+    } else {
+      localQuotes.push(sq); // add missing server quote locally
+    }
+  });
+
+  // Push local-only quotes to server
+  for (let quote of localQuotes) {
+    if (quote.category !== "Server") {
+      await postQuoteToServer(quote);
+    }
+  }
+
+  // Save merged result
+  localStorage.setItem("quotes", JSON.stringify(localQuotes));
+  quotes = localQuotes; // update global quotes array
+  populateCategories(); // refresh category filter if needed
+
+  // UI notification
+  const statusDiv = document.getElementById("syncStatus");
+  if (statusDiv) {
+    statusDiv.textContent =
+      conflicts > 0
+        ? `⚠ Conflict resolved: ${conflicts} quotes replaced by server data`
+        : "✅ Quotes synced with server";
+  }
+}
+
+// Periodically sync every 15 seconds
+setInterval(syncQuotes, 15000);
