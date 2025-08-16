@@ -1,11 +1,3 @@
-// Server sync state
-let autoSyncEnabled = true;
-let syncInterval = null;
-let isOnline = navigator.onLine;
-let serverQuotes = [];
-let conflictData = null;
-let lastSyncTimestamp = null;
-
 // Current filter state
 let currentFilter = 'all';
 let filteredQuotes = [];
@@ -27,392 +19,12 @@ const defaultQuotes = [
   { text: "It's not whether you get knocked down, it's whether you get up.", category: "resilience" }
 ];
 
-// Server Simulation and Sync Functions
-const SERVER_API = 'https://jsonplaceholder.typicode.com/posts';
-
-function showNotification(message, type = 'success') {
-  // Simple console notification for basic version
-  console.log(`${type.toUpperCase()}: ${message}`);
-  
-  // If notification elements exist, use them
-  const notification = document.createElement('div');
-  notification.style.position = 'fixed';
-  notification.style.top = '20px';
-  notification.style.right = '20px';
-  notification.style.padding = '15px';
-  notification.style.borderRadius = '5px';
-  notification.style.color = 'white';
-  notification.style.zIndex = '1000';
-  notification.textContent = message;
-  
-  switch(type) {
-    case 'success':
-      notification.style.backgroundColor = '#28a745';
-      break;
-    case 'error':
-      notification.style.backgroundColor = '#dc3545';
-      break;
-    case 'warning':
-      notification.style.backgroundColor = '#ffc107';
-      notification.style.color = '#212529';
-      break;
-  }
-  
-  document.body.appendChild(notification);
-  setTimeout(() => notification.remove(), 4000);
-}
-
-function updateSyncStatus(status, message) {
-  // Update sync indicators if they exist
-  const syncStatus = document.getElementById('syncStatus');
-  const serverStatus = document.getElementById('serverStatus');
-  
-  if (syncStatus) {
-    syncStatus.className = `sync-indicator ${status}`;
-    
-    switch(status) {
-      case 'online':
-        syncStatus.textContent = '🟢 Connected';
-        break;
-      case 'syncing':
-        syncStatus.textContent = '🟡 Syncing...';
-        break;
-      case 'offline':
-        syncStatus.textContent = '🔴 Offline';
-        break;
-      case 'conflict':
-        syncStatus.textContent = '🟠 Conflict Detected';
-        const resolveBtn = document.getElementById('resolveConflicts');
-        if (resolveBtn) resolveBtn.classList.remove('hidden');
-        break;
-    }
-  }
-  
-  if (serverStatus) {
-    switch(status) {
-      case 'online':
-        serverStatus.textContent = 'Online';
-        serverStatus.style.color = '#28a745';
-        break;
-      case 'syncing':
-        serverStatus.textContent = 'Syncing';
-        serverStatus.style.color = '#ffc107';
-        break;
-      case 'offline':
-        serverStatus.textContent = 'Offline';
-        serverStatus.style.color = '#dc3545';
-        break;
-      case 'conflict':
-        serverStatus.textContent = 'Conflict';
-        serverStatus.style.color = '#fd7e14';
-        break;
-    }
-  }
-  
-  if (message) {
-    showNotification(message, status === 'offline' ? 'error' : status === 'conflict' ? 'warning' : 'success');
-  }
-}
-
-async function fetchFromServer() {
-  try {
-    updateSyncStatus('syncing');
-    
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const response = await fetch(SERVER_API + '?_limit=10');
-    if (!response.ok) throw new Error('Server request failed');
-    
-    const serverPosts = await response.json();
-    
-    // Transform JSONPlaceholder posts into quote format
-    serverQuotes = serverPosts.map((post, index) => ({
-      text: post.body.split('.')[0] + '.',
-      category: ['motivation', 'life', 'success', 'inspiration', 'wisdom'][index % 5],
-      serverId: post.id,
-      lastModified: new Date().toISOString()
-    }));
-    
-    updateSyncStatus('online', 'Server data fetched successfully');
-    return serverQuotes;
-    
-  } catch (error) {
-    console.error('Server fetch error:', error);
-    updateSyncStatus('offline', 'Failed to connect to server');
-    return null;
-  }
-}
-
-async function postToServer(quotesToSync) {
-  try {
-    updateSyncStatus('syncing');
-    
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    const response = await fetch(SERVER_API, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        title: 'Quotes Sync',
-        body: JSON.stringify(quotesToSync),
-        userId: 1
-      })
-    });
-    
-    if (!response.ok) throw new Error('Server post failed');
-    
-    const result = await response.json();
-    updateSyncStatus('online', 'Local data synced to server');
-    return result;
-    
-  } catch (error) {
-    console.error('Server post error:', error);
-    updateSyncStatus('offline', 'Failed to sync to server');
-    return null;
-  }
-}
-
-function detectConflicts(localQuotes, serverQuotes) {
-  const conflicts = [];
-  const localMap = new Map(localQuotes.map(q => [q.text.toLowerCase(), q]));
-  
-  serverQuotes.forEach(serverQuote => {
-    const localQuote = localMap.get(serverQuote.text.toLowerCase());
-    if (localQuote && localQuote.category !== serverQuote.category) {
-      conflicts.push({
-        type: 'category_mismatch',
-        local: localQuote,
-        server: serverQuote
-      });
-    }
-  });
-  
-  return conflicts;
-}
-
-async function syncWithServer() {
-  if (!isOnline) {
-    updateSyncStatus('offline', 'Device is offline');
-    return;
-  }
-  
-  try {
-    const fetchedQuotes = await fetchFromServer();
-    if (!fetchedQuotes) return;
-    
-    const conflicts = detectConflicts(quotes, fetchedQuotes);
-    
-    if (conflicts.length > 0) {
-      conflictData = {
-        conflicts: conflicts,
-        serverQuotes: fetchedQuotes
-      };
-      updateSyncStatus('conflict', `${conflicts.length} conflicts detected`);
-      showConflictNotification(conflicts.length);
-      return;
-    }
-    
-    const mergedQuotes = mergeServerData(quotes, fetchedQuotes);
-    if (mergedQuotes.length !== quotes.length) {
-      quotes = mergedQuotes;
-      filteredQuotes = [...quotes];
-      saveQuotes();
-      populateCategories();
-      filterQuotes();
-      updateSyncStatus('online', `Synced: Added ${mergedQuotes.length - quotes.length + fetchedQuotes.length} new quotes`);
-    } else {
-      updateSyncStatus('online', 'Data is up to date');
-    }
-    
-    updateLastSyncTime();
-    
-  } catch (error) {
-    console.error('Sync error:', error);
-    updateSyncStatus('offline', 'Sync failed');
-  }
-}
-
-function mergeServerData(localQuotes, serverQuotes) {
-  const merged = [...localQuotes];
-  const localTexts = new Set(localQuotes.map(q => q.text.toLowerCase()));
-  
-  serverQuotes.forEach(serverQuote => {
-    if (!localTexts.has(serverQuote.text.toLowerCase())) {
-      merged.push({
-        text: serverQuote.text,
-        category: serverQuote.category,
-        source: 'server',
-        synced: true
-      });
-    }
-  });
-  
-  return merged;
-}
-
-function showConflictNotification(conflictCount) {
-  const notification = document.getElementById('conflictNotification');
-  if (notification) {
-    const message = document.getElementById('conflictMessage');
-    message.textContent = `Found ${conflictCount} conflicts between local and server data. Choose how to resolve:`;
-    notification.classList.remove('hidden');
-  } else {
-    // Fallback for basic version
-    const choice = confirm(`Found ${conflictCount} conflicts. Click OK to use server data, Cancel to keep local data.`);
-    if (choice) {
-      useServerData();
-    } else {
-      useLocalData();
-    }
-  }
-}
-
-function hideConflictNotification() {
-  const notification = document.getElementById('conflictNotification');
-  const resolveBtn = document.getElementById('resolveConflicts');
-  if (notification) notification.classList.add('hidden');
-  if (resolveBtn) resolveBtn.classList.add('hidden');
-  conflictData = null;
-}
-
-function useServerData() {
-  if (!conflictData) return;
-  
-  quotes = mergeServerData([], conflictData.serverQuotes);
-  filteredQuotes = [...quotes];
-  saveQuotes();
-  populateCategories();
-  filterQuotes();
-  
-  hideConflictNotification();
-  updateSyncStatus('online', 'Conflicts resolved: Using server data');
-  updateLastSyncTime();
-}
-
-function useLocalData() {
-  if (!conflictData) return;
-  
-  postToServer(quotes);
-  hideConflictNotification();
-  updateSyncStatus('online', 'Conflicts resolved: Keeping local data');
-  updateLastSyncTime();
-}
-
-function mergeData() {
-  if (!conflictData) return;
-  
-  const mergedQuotes = mergeServerData(quotes, conflictData.serverQuotes);
-  
-  conflictData.conflicts.forEach(conflict => {
-    if (conflict.type === 'category_mismatch') {
-      mergedQuotes.push({
-        text: conflict.server.text + ' (server version)',
-        category: conflict.server.category,
-        source: 'server'
-      });
-    }
-  });
-  
-  quotes = mergedQuotes;
-  filteredQuotes = [...quotes];
-  saveQuotes();
-  populateCategories();
-  filterQuotes();
-  
-  hideConflictNotification();
-  updateSyncStatus('online', 'Conflicts resolved: Data merged');
-  updateLastSyncTime();
-}
-
-function toggleAutoSync() {
-  autoSyncEnabled = !autoSyncEnabled;
-  const button = document.getElementById('toggleAutoSync');
-  const status = document.getElementById('autoSyncStatus');
-  
-  if (button) {
-    if (autoSyncEnabled) {
-      button.textContent = '⚙️ Auto Sync: ON';
-      button.classList.remove('disabled');
-      startAutoSync();
-      showNotification('Auto sync enabled', 'success');
-    } else {
-      button.textContent = '⚙️ Auto Sync: OFF';
-      button.classList.add('disabled');
-      stopAutoSync();
-      showNotification('Auto sync disabled', 'warning');
-    }
-  }
-  
-  if (status) {
-    status.textContent = autoSyncEnabled ? 'Enabled' : 'Disabled';
-  }
-  
-  saveToSessionStorage('autoSyncEnabled', autoSyncEnabled);
-}
-
-function startAutoSync() {
-  if (syncInterval) clearInterval(syncInterval);
-  
-  syncInterval = setInterval(() => {
-    if (autoSyncEnabled && isOnline) {
-      syncWithServer();
-    }
-  }, 30000);
-}
-
-function stopAutoSync() {
-  if (syncInterval) {
-    clearInterval(syncInterval);
-    syncInterval = null;
-  }
-}
-
-function handleOnlineStatus() {
-  isOnline = navigator.onLine;
-  if (isOnline) {
-    updateSyncStatus('online', 'Connection restored');
-    if (autoSyncEnabled) syncWithServer();
-  } else {
-    updateSyncStatus('offline', 'Connection lost');
-  }
-}
-
-function updateLastSyncTime() {
-  const now = new Date();
-  lastSyncTimestamp = now.toISOString();
-  const lastSyncElement = document.getElementById('lastSync');
-  if (lastSyncElement) {
-    lastSyncElement.textContent = `Last sync: ${now.toLocaleTimeString()}`;
-  }
-  saveToSessionStorage('lastSyncTime', lastSyncTimestamp);
-}
-
-function loadLastSyncTime() {
-  const stored = getFromSessionStorage('lastSyncTime');
-  if (stored) {
-    lastSyncTimestamp = stored;
-    const date = new Date(stored);
-    const lastSyncElement = document.getElementById('lastSync');
-    if (lastSyncElement) {
-      lastSyncElement.textContent = `Last sync: ${date.toLocaleTimeString()}`;
-    }
-  }
-}
-
 // Local Storage Functions
 function saveQuotes() {
   try {
     localStorage.setItem('quotes', JSON.stringify(quotes));
     updateStorageInfo();
     console.log('Quotes saved to localStorage');
-    
-    // Trigger sync if online and auto-sync is enabled
-    if (isOnline && autoSyncEnabled && quotes.length > 0) {
-      setTimeout(() => postToServer(quotes), 2000);
-    }
   } catch (error) {
     console.error('Error saving quotes to localStorage:', error);
     alert('Error saving quotes. Your browser may have storage limitations.');
@@ -464,26 +76,6 @@ function loadQuotes() {
     
     // Apply the loaded filter
     filterQuotes();
-    
-    // Load sync preferences
-    const autoSyncPref = getFromSessionStorage('autoSyncEnabled');
-    if (autoSyncPref !== null) {
-      autoSyncEnabled = autoSyncPref;
-      const button = document.getElementById('toggleAutoSync');
-      const status = document.getElementById('autoSyncStatus');
-      if (button && !autoSyncEnabled) {
-        button.textContent = '⚙️ Auto Sync: OFF';
-        button.classList.add('disabled');
-      }
-      if (status) {
-        status.textContent = autoSyncEnabled ? 'Enabled' : 'Disabled';
-      }
-    }
-    
-    // Initial sync if online and auto-sync enabled
-    if (isOnline && autoSyncEnabled) {
-      setTimeout(syncWithServer, 2000);
-    }
     
   } catch (error) {
     console.error('Error loading quotes from localStorage:', error);
@@ -1003,26 +595,6 @@ document.addEventListener('DOMContentLoaded', function() {
   const resetButton = document.getElementById('resetFilter');
   if (resetButton) resetButton.addEventListener('click', resetFilter);
   
-  // Add click event listeners for sync controls (if they exist)
-  const manualSyncBtn = document.getElementById('manualSync');
-  const toggleAutoSyncBtn = document.getElementById('toggleAutoSync');
-  const useServerBtn = document.getElementById('useServerData');
-  const useLocalBtn = document.getElementById('useLocalData');
-  const mergeBtn = document.getElementById('mergeData');
-  const resolveBtn = document.getElementById('resolveConflicts');
-  
-  if (manualSyncBtn) manualSyncBtn.addEventListener('click', syncWithServer);
-  if (toggleAutoSyncBtn) toggleAutoSyncBtn.addEventListener('click', toggleAutoSync);
-  if (useServerBtn) useServerBtn.addEventListener('click', useServerData);
-  if (useLocalBtn) useLocalBtn.addEventListener('click', useLocalData);
-  if (mergeBtn) mergeBtn.addEventListener('click', mergeData);
-  if (resolveBtn) {
-    resolveBtn.addEventListener('click', () => {
-      const notification = document.getElementById('conflictNotification');
-      if (notification) notification.classList.remove('hidden');
-    });
-  }
-  
   // Add click event listener to "Clear All Data" button (if exists)
   const clearButton = document.getElementById('clearStorage');
   if (clearButton) clearButton.addEventListener('click', clearAllData);
@@ -1042,32 +614,91 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
   
-  // Handle online/offline events
-  window.addEventListener('online', handleOnlineStatus);
-  window.addEventListener('offline', handleOnlineStatus);
-  
-  // Load last sync time
-  loadLastSyncTime();
-  
-  // Start auto sync if enabled
-  if (autoSyncEnabled) {
-    startAutoSync();
-  }
-  
-  // Initial connection check
-  handleOnlineStatus();
-  
   // Handle page unload to save session data
   window.addEventListener('beforeunload', function() {
     // Save any pending session data
     saveToSessionStorage('sessionEnded', new Date().toISOString());
-    
-    // Stop sync interval
-    stopAutoSync();
   });
   
-  console.log('Enterprise Quote Generator with Server Sync loaded successfully');
+  console.log('DOM manipulation script with filtering and web storage loaded successfully');
   console.log('Initial quotes count:', quotes.length);
   console.log('Filter system initialized');
-  console.log('Sync system initialized - Auto sync:', autoSyncEnabled);
 });
+
+// Mock API URL (JSONPlaceholder)
+const API_URL = "https://jsonplaceholder.typicode.com/posts";
+
+// Fetch quotes from the server
+async function fetchQuotesFromServer() {
+  try {
+    const response = await fetch(API_URL);
+    const data = await response.json();
+
+    // Map server data into { text, category }
+    return data.slice(0, 5).map(item => ({
+      text: item.title,
+      category: "Server"
+    }));
+  } catch (error) {
+    console.error("Error fetching from server:", error);
+    return [];
+  }
+}
+
+// Post a new quote to the server
+async function postQuoteToServer(quote) {
+  try {
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(quote)
+    });
+    const data = await response.json();
+    console.log("Posted to server:", data);
+  } catch (error) {
+    console.error("Error posting to server:", error);
+  }
+}
+
+// Sync local quotes with server
+async function syncQuotes() {
+  const serverQuotes = await fetchQuotesFromServer();
+  let localQuotes = JSON.parse(localStorage.getItem("quotes")) || [];
+
+  let conflicts = 0;
+
+  // Conflict resolution: server data takes precedence
+  serverQuotes.forEach(sq => {
+    const matchIndex = localQuotes.findIndex(lq => lq.text === sq.text);
+    if (matchIndex !== -1) {
+      localQuotes[matchIndex] = sq; // overwrite with server version
+      conflicts++;
+    } else {
+      localQuotes.push(sq); // add missing server quote locally
+    }
+  });
+
+  // Push local-only quotes to server
+  for (let quote of localQuotes) {
+    if (quote.category !== "Server") {
+      await postQuoteToServer(quote);
+    }
+  }
+
+  // Save merged result
+  localStorage.setItem("quotes", JSON.stringify(localQuotes));
+  quotes = localQuotes; // update global quotes array
+  populateCategories(); // refresh category filter if needed
+
+  // UI notification
+  const statusDiv = document.getElementById("syncStatus");
+  if (statusDiv) {
+    statusDiv.textContent =
+      conflicts > 0
+        ? `⚠ Conflict resolved: ${conflicts} quotes replaced by server data`
+        : "Quotes synced with server!";
+  }
+}
+
+// Periodically sync every 15 seconds
+setInterval(syncQuotes, 15000);
